@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>CacheVR: Hierarki Memori dalam Ruang Imersif</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg1: #070b16;
+    --bg2: #12203a;
+    --accent: #f2c94c;
+    --accent2: #56ccf2;
+    --text: #e9eef7;
+    --panel: rgba(9, 15, 28, 0.88);
+    --border: rgba(120, 160, 220, 0.28);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: radial-gradient(circle at 30% 20%, #16264a 0%, var(--bg1) 55%, #03060d 100%);
+  }
+  #camfeed {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; display: none; z-index: 0;
+  }
+  a-scene { z-index: 1; }
+  .hud {
+    position: fixed; z-index: 20;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+    padding: 14px 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  }
+  #info { top: 16px; left: 16px; width: 300px; max-width: calc(100vw - 32px); }
+  #info h1 { font-size: 15px; margin: 0 0 4px; letter-spacing: .3px; }
+  #info p.sub { margin: 0 0 10px; font-size: 11.5px; opacity: .72; line-height: 1.45; }
+  #readout {
+    font-size: 12px; line-height: 1.55;
+    border-left: 3px solid var(--accent); padding-left: 10px; margin-top: 8px;
+  }
+  #readout b { color: var(--accent); }
+  .hint { font-size: 11px; opacity: .6; margin-top: 8px; }
+  #dock {
+    bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+    padding: 10px 12px;
+  }
+  button {
+    font: inherit; font-size: 12.5px; cursor: pointer;
+    color: #0a1220; background: var(--text);
+    border: none; border-radius: 9px; padding: 9px 14px;
+    transition: transform .12s ease, opacity .12s ease;
+  }
+  button:hover { transform: translateY(-1px); }
+  button.ghost {
+    background: rgba(255,255,255,.07); color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.ai { background: linear-gradient(120deg, var(--accent2), #9b7bff); color: #06101f; }
+  .modal {
+    position: fixed; z-index: 40; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(2,5,12,.7); padding: 16px;
+  }
+  .modal.open { display: flex; }
+  .sheet {
+    width: 520px; max-width: 100%; max-height: 86vh; overflow: auto;
+    background: #0b1220; border: 1px solid var(--border);
+    border-radius: 16px; padding: 18px;
+  }
+  .sheet h2 { margin: 0 0 6px; font-size: 15px; }
+  .sheet p.note { font-size: 11.5px; opacity: .7; line-height: 1.5; margin: 0 0 12px; }
+  textarea, input[type="text"], input[type="password"] {
+    width: 100%; background: rgba(255,255,255,.06); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; font: inherit; font-size: 12.5px; resize: vertical;
+  }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  #chatlog { margin-top: 12px; font-size: 12.5px; line-height: 1.6; }
+  .msg { padding: 9px 11px; border-radius: 10px; margin-bottom: 8px; }
+  .msg.user { background: rgba(86,204,242,.14); }
+  .msg.bot { background: rgba(242,201,76,.11); }
+  .quiz-q { margin-bottom: 12px; font-size: 12.5px; line-height: 1.5; }
+  .quiz-q label { display: block; padding: 6px 8px; border-radius: 8px; cursor: pointer; margin-top: 4px; }
+  .quiz-q label:hover { background: rgba(255,255,255,.05); }
+  #quizResult { font-size: 12.5px; margin-top: 10px; color: var(--accent); }
+  .philo { font-size: 12px; line-height: 1.6; }
+  .philo b { color: var(--accent2); }
+  #flow {
+    top: 16px; right: 16px; width: 232px; font-size: 12px;
+  }
+  .flow-head { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 8px; letter-spacing: .2px; }
+  #timer { color: var(--accent); font-variant-numeric: tabular-nums; }
+  #flowList { margin: 0; padding-left: 18px; line-height: 1.75; opacity: .55; }
+  #flowList li.done { opacity: 1; color: #7ee2a8; text-decoration: line-through; }
+  #flowList li.active { opacity: 1; color: var(--accent2); font-weight: 600; }
+  .flow-foot { margin-top: 8px; font-size: 10.5px; opacity: .5; }
+  .scen-card {
+    background: rgba(255,255,255,.05); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; margin-top: 10px;
+    font-size: 12.5px; line-height: 1.6;
+  }
+  .scen-card b { color: var(--accent2); }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .stat { background: rgba(255,255,255,.05); border-radius: 10px; padding: 8px; text-align: center; }
+  .stat span { display: block; font-size: 10.5px; opacity: .6; }
+  .stat strong { font-size: 15px; color: var(--accent); }
+  @media (max-width: 720px) {
+    #flow { display: none; }
+  }
+  @media (max-width: 560px) {
+    #info { width: calc(100vw - 32px); }
+    #info p.sub { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<video id="camfeed" playsinline muted autoplay></video>
+
+<div id="info" class="hud">
+  <h1>CacheVR &middot; Hierarki Memori</h1>
+  <p class="sub">Arsitektur Komputer: jelajahi L1, L2, L3, dan RAM dalam 3D. Klik komponen untuk melihat waktu akses, lalu tekan <b>Akses Data</b>.</p>
+  <div id="readout">Pilih salah satu tingkat memori untuk mulai.</div>
+  <div class="hint">Klik objek &middot; geser untuk melihat &middot; tombol kacamata untuk mode VR</div>
+</div>
+
+<div id="dock" class="hud">
+  <button id="btnAccess">Akses Data</button>
+  <button id="btnLab" class="ai">Lab Skenario GenAI</button>
+  <button id="btnQuiz" class="ghost">Kuis</button>
+  <button id="btnAI" class="ghost">Tanya AI</button>
+  <button id="btnPhilo" class="ghost">Filosofi Lokal</button>
+  <button id="btnAR" class="ghost">Mode AR</button>
+</div>
+
+<div id="flow" class="hud">
+  <div class="flow-head">
+    <span>Alur Belajar</span>
+    <span id="timer">00:00</span>
+  </div>
+  <ol id="flowList">
+    <li data-step="1">Pilih tingkat memori</li>
+    <li data-step="2">Jalankan akses data</li>
+    <li data-step="3">Buat skenario di Lab GenAI</li>
+    <li data-step="4">Simulasikan &amp; baca statistik</li>
+    <li data-step="5">Kerjakan kuis</li>
+  </ol>
+  <div class="flow-foot">Target durasi 15-20 menit</div>
+</div>
+
+<div id="quizModal" class="modal">
+  <div class="sheet">
+    <h2>Kuis Cepat: Hierarki Memori</h2>
+    <p class="note">Jawab tiga pertanyaan berikut. Setiap jawaban salah akan menampilkan penjelasan singkat.</p>
+    <div id="quizBody"></div>
+    <div class="row">
+      <button id="quizSubmit">Periksa Jawaban</button>
+      <button id="quizClose" class="ghost">Tutup</button>
+    </div>
+    <div id="quizResult"></div>
+  </div>
+</div>
+
+<div id="aiModal" class="modal">
+  <div class="sheet">
+    <h2>Asisten GenAI</h2>
+    <p class="note">Mode demo memakai bank penjelasan lokal. Tempel API key OpenAI di bawah untuk mengaktifkan jawaban GenAI langsung (disimpan hanya di sesi browser ini, tidak dikirim ke mana pun selain API).</p>
+    <input type="password" id="apiKey" placeholder="sk-... (opsional, untuk mode GenAI langsung)">
+    <div class="row">
+      <input type="text" id="aiInput" placeholder="Contoh: mengapa L1 lebih cepat dari RAM?">
+      <button id="aiSend" class="ai">Tanya</button>
+    </div>
+    <div id="chatlog"></div>
+    <div class="row"><button id="aiClose" class="ghost">Tutup</button></div>
+  </div>
+</div>
+
+<div id="labModal" class="modal">
+  <div class="sheet">
+    <h2>Lab Skenario GenAI</h2>
+    <p class="note">Tulis kebutuhan latihan Anda, lalu GenAI menyusun variasi skenario akses memori. Skenario langsung divisualkan di ruang 3D dan dihitung statistiknya, sehingga hasilnya bukan sekadar teks.</p>
+    <input type="text" id="labPrompt" placeholder="Contoh: buat 10 akses dengan pola berulang pada array kecil">
+    <div class="row">
+      <button id="labGen" class="ai">Buat Skenario</button>
+      <button id="labRun" class="ghost" disabled>Jalankan di 3D</button>
+    </div>
+    <div id="labOut"></div>
+    <div class="row"><button id="labClose" class="ghost">Tutup</button></div>
+  </div>
+</div>
+
+<div id="philoModal" class="modal">
+  <div class="sheet">
+    <h2>Tudang Sipulung Data</h2>
+    <p class="philo">
+      Masyarakat Bugis-Makassar mengenal <b>tudang sipulung</b>, musyawarah duduk bersama untuk memutuskan hal penting, dan <b>sipakatau</b>, sikap saling memanusiakan. Keduanya menjadi metafora hierarki cache: keputusan diambil di tingkat terdekat lebih dulu, dan hanya naik ke tingkat yang lebih jauh bila memang perlu.
+    </p>
+    <p class="philo">
+      L1 seperti pembicaraan di lingkaran terdekat, cepat tetapi kapasitasnya kecil. L2 dan L3 memperluas lingkaran, sementara RAM adalah forum besar yang menampung semua, namun memerlukan waktu lebih lama untuk mencapai kesepakatan. Prinsip <b>sipakatau</b> mengingatkan bahwa data yang paling sering dipakai pantas mendapat tempat terdekat, bukan dibiarkan menunggu di forum besar.
+    </p>
+    <p class="philo">
+      Dalam desain interaksi, nilai ini diwujudkan lewat alur <b>musyawarah bertahap</b>: mahasiswa harus memilih tingkat yang tepat sebelum data bergerak. Salah memilih membuat data menempuh jalur lebih jauh, persis seperti keputusan yang dipaksakan tanpa musyawarah di tingkat terdekat.
+    </p>
+    <div class="row"><button id="philoClose" class="ghost">Tutup</button></div>
+  </div>
+</div>
+
+<a-scene renderer="alpha: true; antialias: true; colorManagement: true"
+         vr-mode-ui="enabled: true"
+         device-orientation-permission-ui="enabled: true">
+
+  <a-entity light="type: ambient; intensity: 0.75"></a-entity>
+  <a-entity light="type: directional; intensity: 0.65; position: 3 6 4"></a-entity>
+  <a-entity light="type: point; color: #56ccf2; intensity: 0.7; position: -4 3 2"></a-entity>
+
+  <a-plane position="0 0 0" rotation="-90 0 0" width="26" height="26"
+           material="color: #0e1a2f; opacity: 0.55; transparent: true; shader: flat"></a-plane>
+  <a-circle position="0 0.01 0" rotation="-90 0 0" radius="4.2"
+            material="color: #16294a; opacity: 0.55; transparent: true; shader: flat"></a-circle>
+
+  <a-entity id="rig" position="0 1.75 6.4">
+    <a-entity camera look-controls wasd-controls="acceleration: 22">
+      <a-entity cursor="rayOrigin: mouse; fuse: false"
+                raycaster="objects: .clickable; far: 30"
+                geometry="primitive: ring; radiusInner: 0.006; radiusOuter: 0.012"
+                material="color: #f2c94c; shader: flat"></a-entity>
+      <a-entity cursor="fuse: true; fuseTimeout: 900"
+                raycaster="objects: .clickable; far: 12"
+                position="0 0 -1"
+                geometry="primitive: ring; radiusInner: 0.012; radiusOuter: 0.019"
+                material="color: #ffffff; shader: flat"
+                animation="property: scale; to: 1.35 1.35 1.35; dir: alternate; dur: 600; loop: true"></a-entity>
+    </a-entity>
+  </a-entity>
+
+  <a-text value="RAM" position="4.6 1.85 0" align="center" color="#7fb2ff" width="5"></a-text>
+  <a-text value="L3 Cache" position="2.3 1.65 0" align="center" color="#56ccf2" width="7"></a-text>
+  <a-text value="L2 Cache" position="0 1.45 0" align="center" color="#6fcf97" width="7"></a-text>
+  <a-text value="L1 Cache" position="-2.4 1.3 0" align="center" color="#f2c94c" width="7"></a-text>
+  <a-text value="CPU" position="-4.6 1.5 0" align="center" color="#ff9d6e" width="5"></a-text>
+
+  <a-box class="clickable" data-level="RAM" position="4.6 0.6 0" width="1.7" height="1.2" depth="1.7"
+         color="#2d5aa8" material="metalness: 0.35; roughness: 0.5">
+    <a-text value="200 cyc" position="0 -0.15 0.88" align="center" color="#dfe9ff" width="2.6"></a-text>
+  </a-box>
+
+  <a-box class="clickable" data-level="L3" position="2.3 0.5 0" width="1.35" height="1" depth="1.35"
+         color="#1f7a99" material="metalness: 0.3; roughness: 0.55">
+    <a-text value="40 cyc" position="0 -0.12 0.7" align="center" color="#d7f6ff" width="2.4"></a-text>
+  </a-box>
+
+  <a-box class="clickable" data-level="L2" position="0 0.4 0" width="2.2" height="0.8" depth="1.1"
+         color="#2f8f63" material="metalness: 0.25; roughness: 0.6">
+    <a-text value="12 cyc" position="0 -0.1 0.57" align="center" color="#e6fff2" width="2.2"></a-text>
+  </a-box>
+
+  <a-box class="clickable" data-level="L1" position="-2.4 0.28 0" width="1.8" height="0.55" depth="0.9"
+         color="#b8952c" material="metalness: 0.45; roughness: 0.4">
+    <a-text value="4 cyc" position="0 -0.07 0.47" align="center" color="#fff7dc" width="2"></a-text>
+  </a-box>
+
+  <a-box class="clickable" data-level="CPU" position="-4.6 0.55 0" width="2.4" height="1.1" depth="1.2"
+         color="#a84b28" material="metalness: 0.5; roughness: 0.35">
+    <a-text value="Core" position="0 -0.12 0.62" align="center" color="#ffe9df" width="1.8"></a-text>
+  </a-box>
+
+  <a-box position="0 0.02 0" width="11.5" height="0.04" depth="0.12"
+         material="color: #2a4a7a; opacity: 0.5; transparent: true; shader: flat"></a-box>
+
+  <a-entity id="dataBall" position="4.6 2.4 0" visible="false">
+    <a-sphere radius="0.16" color="#f2c94c"
+              material="emissive: #f2c94c; emissiveIntensity: 0.9"></a-sphere>
+    <a-point-light color="#f2c94c" intensity="0.6" distance="2"></a-point-light>
+  </a-entity>
+
+  <a-entity id="pathLine" visible="false"></a-entity>
+</a-scene>
+
+<script>
+(function () {
+  "use strict";
+
+  var LEVELS = {
+    RAM: { x: 4.6,  y: 2.4, cycles: 200, name: "RAM (DRAM)", size: "8-32 GB",
+           note: "Kapasitas paling besar, tetapi setiap akses menempuh jalur panjang sehingga latensinya ratusan siklus." },
+    L3:  { x: 2.3,  y: 1.95, cycles: 40,  name: "L3 Cache", size: "8-32 MB",
+           note: "Cache bersama antar-inti. Menjembatani L2 dengan RAM, cukup cepat namun tetap jauh di atas L1." },
+    L2:  { x: 0,    y: 1.75, cycles: 12,  name: "L2 Cache", size: "256 KB-2 MB",
+           note: "Cache per inti yang lebih besar dari L1. Menampung data yang jarang dipakai tetapi masih mungkin dibutuhkan." },
+    L1:  { x: -2.4, y: 1.55, cycles: 4,   name: "L1 Cache", size: "16-128 KB",
+           note: "Paling dekat dengan CPU dan paling cepat. Kapasitasnya kecil sehingga hanya menyimpan data yang paling sering dipakai." }
+  };
+
+  var selected = null;
+  var readout = document.getElementById("readout");
+  var ball = document.getElementById("dataBall");
+  var busy = false;
+
+  function updateReadout(html) { readout.innerHTML = html; }
+
+  document.querySelectorAll(".clickable").forEach(function (el) {
+    var level = el.getAttribute("data-level");
+    el.addEventListener("click", function () {
+      selectLevel(level);
+      if (level !== "CPU") markStep(1);
+    });
+    el.addEventListener("mouseenter", function () {
+      el.setAttribute("scale", "1.06 1.06 1.06");
+    });
+    el.addEventListener("mouseleave", function () {
+      el.setAttribute("scale", "1 1 1");
+    });
+  });
+
+  function selectLevel(level) {
+    if (level === "CPU") {
+      updateReadout("<b>CPU</b> mengeksekusi instruksi. Ia tidak menyimpan data sendiri; setiap kebutuhan data dipenuhi lewat hierarki cache.");
+      return;
+    }
+    selected = level;
+    var d = LEVELS[level];
+    updateReadout(
+      "<b>" + d.name + "</b> &middot; " + d.size + "<br>" +
+      "Waktu akses &asymp; <b>" + d.cycles + " siklus</b><br>" +
+      d.note + "<br><span style='opacity:.65'>Tekan <b>Akses Data</b> untuk melihat jalur data menuju CPU.</span>"
+    );
+  }
+
+  function moveBall(toX, toY, dur) {
+    return new Promise(function (resolve) {
+      ball.setAttribute("visible", true);
+      ball.setAttribute("animation__move", {
+        property: "position",
+        to: toX + " " + toY + " 0",
+        dur: dur,
+        easing: "easeInOutQuad"
+      });
+      setTimeout(resolve, dur + 40);
+    });
+  }
+
+  document.getElementById("btnAccess").addEventListener("click", function () {
+    if (busy) return;
+    if (!selected) {
+      updateReadout("Pilih dulu salah satu tingkat memori (L1, L2, L3, atau RAM).");
+      return;
+    }
+    busy = true;
+    var d = LEVELS[selected];
+    ball.setAttribute("position", "4.6 2.4 0");
+    ball.setAttribute("visible", true);
+
+    var duration = Math.max(500, d.cycles * 14);
+
+    moveBall(4.6, 2.4, 220).then(function () {
+      if (selected !== "RAM") {
+        return moveBall(d.x, d.y, duration);
+      }
+      return Promise.resolve();
+    }).then(function () {
+      return moveBall(-4.6, 1.4, Math.max(420, d.cycles * 6));
+    }).then(function () {
+      ball.setAttribute("visible", false);
+      ball.removeAttribute("animation__move");
+      var verdict = d.cycles <= 12
+        ? "Hit: data tersedia dekat CPU, eksekusi berlanjut hampir tanpa jeda."
+        : d.cycles <= 40
+          ? "Hit parsial: data ditemukan, tetapi CPU menunggu puluhan siklus."
+          : "Miss: data harus diambil dari RAM, CPU menunggu ratusan siklus.";
+      updateReadout(
+        "<b>" + d.name + "</b> &middot; " + d.cycles + " siklus<br>" + verdict +
+        "<br><span style='opacity:.65'>Bandingkan dengan L1 (4 siklus) untuk melihat pentingnya lokalitas data.</span>"
+      );
+      busy = false;
+      markStep(2);
+    });
+  });
+
+  var QUIZ = [
+    {
+      q: "1. Mengapa L1 cache lebih cepat daripada RAM?",
+      options: [
+        "Karena kapasitasnya lebih besar",
+        "Karena letaknya lebih dekat ke CPU dan teknologinya (SRAM) lebih cepat",
+        "Karena menyimpan seluruh data program"
+      ],
+      answer: 1,
+      why: "L1 memakai SRAM, berada di dalam inti, dan hanya menyimpan data yang paling sering dipakai."
+    },
+    {
+      q: "2. Sebuah program berulang kali mengakses array yang sama. Prinsip apa yang membuat cache bekerja efektif?",
+      options: [
+        "Lokalitas (temporal dan spasial)",
+        "Paralelisme instruksi",
+        "Virtualisasi memori"
+      ],
+      answer: 0,
+      why: "Lokalitas temporal (data dipakai berulang) dan spasial (alamat berdekatan) membuat cache bernilai."
+    },
+    {
+      q: "3. Jika terjadi cache miss pada L1, urutan pemeriksaan yang wajar adalah...",
+      options: [
+        "Langsung ke RAM, melewati L2 dan L3",
+        "L2, lalu L3, lalu RAM",
+        "CPU mengulang instruksi tanpa mengambil data"
+      ],
+      answer: 1,
+      why: "Hierarki diperiksa bertingkat: L1, L2, L3, baru RAM. Setiap tingkat menambah latensi."
+    }
+  ];
+
+  function renderQuiz() {
+    var body = document.getElementById("quizBody");
+    body.innerHTML = "";
+    QUIZ.forEach(function (item, qi) {
+      var wrap = document.createElement("div");
+      wrap.className = "quiz-q";
+      var q = document.createElement("div");
+      q.textContent = item.q;
+      wrap.appendChild(q);
+      item.options.forEach(function (opt, oi) {
+        var label = document.createElement("label");
+        var input = document.createElement("input");
+        input.type = "radio";
+        input.name = "q" + qi;
+        input.value = oi;
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(" " + opt));
+        wrap.appendChild(label);
+      });
+      body.appendChild(wrap);
+    });
+  }
+
+  document.getElementById("btnQuiz").addEventListener("click", function () {
+    renderQuiz();
+    document.getElementById("quizResult").textContent = "";
+    document.getElementById("quizModal").classList.add("open");
+  });
+
+  document.getElementById("quizClose").addEventListener("click", function () {
+    document.getElementById("quizModal").classList.remove("open");
+  });
+
+  document.getElementById("quizSubmit").addEventListener("click", function () {
+    var score = 0;
+    var feedback = [];
+    QUIZ.forEach(function (item, qi) {
+      var picked = document.querySelector('input[name="q' + qi + '"]:checked');
+      if (picked && Number(picked.value) === item.answer) {
+        score++;
+      } else {
+        feedback.push(item.why);
+      }
+    });
+    var out = "Skor: " + score + "/" + QUIZ.length + ". ";
+    out += feedback.length ? "Catatan: " + feedback.join(" ") : "Semua jawaban tepat.";
+    document.getElementById("quizResult").textContent = out;
+    markStep(5);
+  });
+
+  var KB = [
+    { keys: ["l1", "level 1", "tercepat"], text: "L1 cache adalah tingkat tercepat (sekitar 4 siklus) karena berada di dalam inti prosesor dan memakai SRAM. Kapasitasnya kecil, biasanya 16-128 KB per inti, sehingga hanya data yang paling sering dipakai yang disimpan di sana." },
+    { keys: ["l2", "l3", "perbedaan"], text: "L2 adalah cache per inti berukuran ratusan KB hingga beberapa MB dengan latensi sekitar 12 siklus. L3 lebih besar dan sering dipakai bersama antar-inti, dengan latensi sekitar 40 siklus. Semakin jauh dari CPU, kapasitas naik tetapi latensi juga naik." },
+    { keys: ["ram", "dram", "memori utama"], text: "RAM menyimpan data dan program yang sedang aktif dengan kapasitas besar, tetapi aksesnya lambat (ratusan siklus) karena harus melewati bus memori. Cache menutupi kesenjangan kecepatan antara CPU dan RAM." },
+    { keys: ["hit", "miss"], text: "Cache hit terjadi bila data yang dicari ada di cache, sehingga akses cepat. Cache miss berarti data tidak ditemukan, lalu pencarian berlanjut ke tingkat berikutnya hingga RAM, dan CPU menunggu lebih lama." },
+    { keys: ["lokalitas", "locality"], text: "Lokalitas temporal berarti data yang baru dipakai cenderung dipakai lagi dalam waktu dekat. Lokalitas spasial berarti data di alamat berdekatan cenderung diakses berurutan. Keduanya membuat cache dan prefetching efektif." },
+    { keys: ["tudang", "sipulung", "kearifan", "bugis"], text: "Dalam metafora tudang sipulung, keputusan diambil di lingkaran terdekat lebih dulu. Demikian pula data dilayani L1 lebih dulu, lalu naik ke L2, L3, dan RAM hanya bila diperlukan. Nilai sipakatau mengingatkan bahwa data yang paling sering dipakai pantas mendapat tempat terdekat." },
+    { keys: ["pipeline", "instruksi"], text: "Cache instruksi dan cache data biasanya dipisah pada L1 agar pipeline tidak terganggu. Cache miss pada jalur instruksi dapat menghentikan pipeline (stall) dan menurunkan IPC." }
+  ];
+
+  function localAnswer(question) {
+    var q = question.toLowerCase();
+    var best = null;
+    var bestScore = 0;
+    KB.forEach(function (entry) {
+      var score = entry.keys.filter(function (k) { return q.indexOf(k) !== -1; }).length;
+      if (score > bestScore) { bestScore = score; best = entry; }
+    });
+    if (best) return best.text;
+    return "Saya belum punya jawaban spesifik untuk pertanyaan itu pada mode demo. Coba tanyakan tentang L1, L2, L3, RAM, cache hit/miss, lokalitas, atau kaitannya dengan tudang sipulung. Untuk jawaban bebas, aktifkan mode GenAI dengan API key.";
+  }
+
+  function appendMsg(role, text) {
+    var log = document.getElementById("chatlog");
+    var div = document.createElement("div");
+    div.className = "msg " + role;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function askGenAI(question, key) {
+    var res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + key
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.4,
+        messages: [
+          {
+            role: "system",
+            content: "Anda asisten pembelajaran Arsitektur Komputer untuk mahasiswa politeknik. Jawab dalam Bahasa Indonesia, ringkas (maksimal 120 kata), akurat, dan beri satu contoh konkret. Fokus pada hierarki memori cache (L1, L2, L3, RAM), lokalitas, cache hit/miss, dan pipeline."
+          },
+          { role: "user", content: question }
+        ]
+      })
+    });
+    if (!res.ok) throw new Error("Permintaan gagal: " + res.status);
+    var data = await res.json();
+    return data.choices[0].message.content.trim();
+  }
+
+  document.getElementById("btnAI").addEventListener("click", function () {
+    document.getElementById("aiModal").classList.add("open");
+  });
+  document.getElementById("aiClose").addEventListener("click", function () {
+    document.getElementById("aiModal").classList.remove("open");
+  });
+
+  document.getElementById("aiSend").addEventListener("click", async function () {
+    var input = document.getElementById("aiInput");
+    var q = input.value.trim();
+    if (!q) return;
+    appendMsg("user", q);
+    input.value = "";
+    var key = document.getElementById("apiKey").value.trim() || sessionStorage.getItem("oai_key");
+    if (!key) {
+      appendMsg("bot", localAnswer(q));
+      return;
+    }
+    sessionStorage.setItem("oai_key", key);
+    appendMsg("bot", "Menyusun jawaban...");
+    var last = document.getElementById("chatlog").lastChild;
+    try {
+      var ans = await askGenAI(q, key);
+      last.textContent = ans;
+    } catch (err) {
+      last.textContent = "Gagal menghubungi API (" + err.message + "). Menggunakan bank penjelasan lokal: " + localAnswer(q);
+    }
+  });
+
+  document.getElementById("btnPhilo").addEventListener("click", function () {
+    document.getElementById("philoModal").classList.add("open");
+  });
+  document.getElementById("philoClose").addEventListener("click", function () {
+    document.getElementById("philoModal").classList.remove("open");
+  });
+
+  var arOn = false;
+  document.getElementById("btnAR").addEventListener("click", async function () {
+    var video = document.getElementById("camfeed");
+    if (arOn) {
+      var stream = video.srcObject;
+      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); }
+      video.srcObject = null;
+      video.style.display = "none";
+      document.body.style.background = "radial-gradient(circle at 30% 20%, #16264a 0%, #070b16 55%, #03060d 100%)";
+      document.getElementById("btnAR").textContent = "Mode AR";
+      arOn = false;
+      return;
+    }
+    try {
+      var s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      video.srcObject = s;
+      video.style.display = "block";
+      document.body.style.background = "#000";
+      document.getElementById("btnAR").textContent = "Keluar AR";
+      arOn = true;
+      updateReadout("<b>Mode AR sederhana</b>: kamera menjadi latar sehingga model 3D tampak berada di ruang nyata. Gunakan gerakan perangkat untuk melihat objek dari berbagai sudut.");
+    } catch (err) {
+      updateReadout("Kamera tidak dapat diakses (" + err.message + "). Mode AR memerlukan izin kamera dan koneksi aman (https atau localhost).");
+    }
+  });
+
+  /* ---------- Alur belajar & timer ---------- */
+  var started = Date.now();
+  var timerEl = document.getElementById("timer");
+  setInterval(function () {
+    var s = Math.floor((Date.now() - started) / 1000);
+    var mm = String(Math.floor(s / 60)).padStart(2, "0");
+    var ss = String(s % 60).padStart(2, "0");
+    timerEl.textContent = mm + ":" + ss;
+  }, 1000);
+
+  var doneSteps = {};
+  function markStep(n) {
+    if (doneSteps[n]) return;
+    doneSteps[n] = true;
+    document.querySelectorAll("#flowList li").forEach(function (li) {
+      var step = Number(li.getAttribute("data-step"));
+      if (step === n) li.classList.add("done");
+      else if (step === n + 1) li.classList.add("active");
+    });
+  }
+
+  /* ---------- Lab Skenario GenAI ---------- */
+  var CAP = { L1: 4, L2: 16, L3: 64, RAM: 512 };
+  var scenario = null;
+
+  function hashSeed(str) {
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function makeRng(seed) {
+    var s = seed || 1;
+    return function () {
+      s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+      return ((s >>> 0) % 100000) / 100000;
+    };
+  }
+
+  function simulate(pattern, n, ws, cap, seed) {
+    var cache = [], hits = 0, misses = 0, trace = [];
+    var rnd = makeRng(seed);
+    for (var i = 0; i < n; i++) {
+      var addr;
+      if (pattern === "temporal") addr = i % Math.max(1, ws);
+      else if (pattern === "sequential") addr = i;
+      else addr = Math.floor(rnd() * Math.max(1, ws));
+      var hit = cache.indexOf(addr) !== -1;
+      if (hit) hits++; else misses++;
+      cache = cache.filter(function (a) { return a !== addr; });
+      cache.push(addr);
+      if (cache.length > cap) cache.shift();
+      trace.push({ addr: addr, hit: hit });
+    }
+    return { hits: hits, misses: misses, trace: trace };
+  }
+
+  function localScenario(prompt) {
+    var q = prompt.toLowerCase();
+    var nMatch = q.match(/\b(\d{1,2})\s*(akses|kali|langkah)/);
+    var n = nMatch ? Math.min(12, Math.max(4, Number(nMatch[1]))) : 8;
+    var wsMatch = q.match(/(?:array|ukuran|working set|data)\s*(\d{1,3})/);
+    var ws = wsMatch ? Math.min(4096, Math.max(2, Number(wsMatch[1]))) : 6;
+
+    var pattern = "temporal";
+    if (/acak|random|tidak beraturan/.test(q)) pattern = "random";
+    else if (/berurutan|sekuensial|sequential|streaming/.test(q)) pattern = "sequential";
+    else if (/berulang|ulang|temporal|lokalitas/.test(q)) pattern = "temporal";
+
+    return { pattern: pattern, n: n, ws: ws };
+  }
+
+  function patternLabel(p) {
+    if (p === "temporal") return "berulang (lokalitas temporal)";
+    if (p === "sequential") return "berurutan (streaming)";
+    return "acak (tanpa lokalitas)";
+  }
+
+  function renderScenarioCard(sc) {
+    var level = selected || "L1";
+    var cap = CAP[level];
+    var out = document.getElementById("labOut");
+    out.innerHTML =
+      '<div class="scen-card">' +
+      '<b>Pola akses:</b> ' + patternLabel(sc.pattern) + '<br>' +
+      '<b>Jumlah akses:</b> ' + sc.n + ' blok &middot; ' +
+      '<b>Working set:</b> ' + sc.ws + ' blok<br>' +
+      '<b>Tingkat memori diuji:</b> ' + level + ' (kapasitas ' + cap + ' blok)' +
+      '<div class="hint">Skenario ini dibuat dari permintaan Anda, divariasikan secara otomatis, lalu siap dijalankan di ruang 3D.</div>' +
+      '</div>';
+    document.getElementById("labRun").disabled = false;
+  }
+
+  async function genScenario(prompt) {
+    var key = document.getElementById("apiKey").value.trim() || sessionStorage.getItem("oai_key");
+    if (key) {
+      try {
+        var res = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            temperature: 0.7,
+            response_format: { type: "json_object" },
+            messages: [
+              {
+                role: "system",
+                content: "Anda perancang latihan Arsitektur Komputer. Keluarkan JSON valid dengan kunci: pattern (salah satu: temporal, sequential, random), n (4-12), ws (2-64), dan alasan (maksimal 25 kata, Bahasa Indonesia)."
+              },
+              { role: "user", content: prompt }
+            ]
+          })
+        });
+        if (res.ok) {
+          var data = await res.json();
+          var parsed = JSON.parse(data.choices[0].message.content);
+          if (parsed && parsed.pattern && parsed.n) {
+            return {
+              pattern: ["temporal", "sequential", "random"].indexOf(parsed.pattern) !== -1 ? parsed.pattern : "temporal",
+              n: Math.min(12, Math.max(4, Number(parsed.n))),
+              ws: Math.min(64, Math.max(2, Number(parsed.ws) || 6))
+            };
+          }
+        }
+      } catch (err) {
+        console.warn("GenAI tidak tersedia, memakai generator lokal:", err.message);
+      }
+    }
+    return localScenario(prompt);
+  }
+
+  document.getElementById("btnLab").addEventListener("click", function () {
+    document.getElementById("labModal").classList.add("open");
+  });
+  document.getElementById("labClose").addEventListener("click", function () {
+    document.getElementById("labModal").classList.remove("open");
+  });
+
+  document.getElementById("labGen").addEventListener("click", async function () {
+    var prompt = document.getElementById("labPrompt").value.trim() || "buat 8 akses dengan pola berulang pada array kecil";
+    document.getElementById("labOut").innerHTML = '<div class="scen-card">Menyusun skenario...</div>';
+    scenario = await genScenario(prompt);
+    renderScenarioCard(scenario);
+    markStep(3);
+  });
+
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function runScenario() {
+    if (!scenario || busy) return;
+    busy = true;
+    var level = selected || "L1";
+    var d = LEVELS[level];
+    var cap = CAP[level];
+    var sim = simulate(scenario.pattern, scenario.n, scenario.ws, cap, hashSeed(JSON.stringify(scenario)));
+
+    var el = document.getElementById("simStats");
+    if (el) el.innerHTML = "";
+
+    var hits = 0, misses = 0, totalLatency = 0;
+    for (var i = 0; i < sim.trace.length; i++) {
+      var tr = sim.trace[i];
+      if (tr.hit) { hits++; totalLatency += d.cycles; }
+      else { misses++; totalLatency += d.cycles + 200; }
+      ball.setAttribute("position", "4.6 2.4 0");
+      ball.setAttribute("visible", true);
+      await moveBall(4.6, 2.4, 160);
+      await moveBall(d.x, d.y + 0.5, tr.hit ? 220 : 420);
+      await moveBall(-4.6, 1.4, tr.hit ? 200 : 380);
+      ball.setAttribute("visible", false);
+      updateReadout(
+        "<b>Akses " + (i + 1) + "/" + sim.trace.length + "</b> &middot; blok #" + tr.addr + " &middot; " +
+        (tr.hit ? "<span style='color:#7ee2a8'>HIT</span>" : "<span style='color:#ff8f6b'>MISS</span>") +
+        "<br>Hit: <b>" + hits + "</b> &middot; Miss: <b>" + misses + "</b>"
+      );
+    }
+    ball.removeAttribute("animation__move");
+
+    var ratio = sim.hits / sim.trace.length;
+    var avg = Math.round(totalLatency / sim.trace.length);
+    var verdict = ratio >= 0.7
+      ? "Lokalitas tinggi: cache bekerja efektif, rata-rata latensi rendah."
+      : ratio >= 0.4
+        ? "Lokalitas sedang: sebagian akses masih menunggu RAM."
+        : "Lokalitas rendah: mayoritas akses berakhir di RAM, latensi tinggi.";
+
+    var out = document.getElementById("labOut");
+    out.innerHTML =
+      '<div class="stat-grid">' +
+      '<div class="stat"><span>Hit</span><strong>' + sim.hits + '</strong></div>' +
+      '<div class="stat"><span>Miss</span><strong>' + sim.misses + '</strong></div>' +
+      '<div class="stat"><span>Hit ratio</span><strong>' + Math.round(ratio * 100) + '%</strong></div>' +
+      '</div>' +
+      '<div class="scen-card"><b>Rata-rata latensi:</b> ' + avg + ' siklus per akses<br>' + verdict +
+      '<div class="hint">Ubah tingkat memori atau pola akses, lalu jalankan lagi untuk membandingkan.</div></div>';
+
+    updateReadout("<b>Simulasi selesai</b> &middot; " + level + "<br>Hit ratio <b>" + Math.round(ratio * 100) + "%</b> &middot; rata-rata <b>" + avg + " siklus</b><br>" + verdict);
+    busy = false;
+    markStep(4);
+  }
+
+  document.getElementById("labRun").addEventListener("click", function () {
+    document.getElementById("labModal").classList.remove("open");
+    runScenario();
+  });
+
+  selectLevel("L1");
+})();
+</script>
+</body>
+</html>
